@@ -2,85 +2,80 @@
 
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const WebSocket = require('ws');
 const sqlite3 = require('sqlite3').verbose();
-const { v4: uuidv4 } = require('uuid');
-const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const PORT = process.env.PORT || 3000;
 
-const db = new sqlite3.Database('./data/users.db');
+// === Раздача статики из frontend ===
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-// Создание �абли�� п�и ��а��е
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    instrument TEXT,
-    socket_id TEXT,
-    connected INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+// === Пример REST API (можно расширить) ===
+app.get('/api/ping', (req, res) => {
+  res.json({ message: 'pong' });
 });
 
-let clients = new Map();
+// === Инициализация SQLite ===
+const db = new sqlite3.Database(path.join(__dirname, '..', 'db.sqlite'), (err) => {
+  if (err) {
+    console.error('Ошибка подключения к базе:', err.message);
+  } else {
+    console.log('Подключено к базе данных SQLite');
+  }
+});
 
-function findMatch(instrument, requesterId) {
-  return new Promise((resolve, reject) => {
-    db.get(
-      `SELECT * FROM users WHERE instrument = ? AND connected = 0 AND id != ? ORDER BY created_at ASC LIMIT 1`,
-      [instrument, requesterId],
-      (err, row) => {
-        if (err) return reject(err);
-        resolve(row);
-      }
-    );
-  });
-}
+// === Запуск HTTP сервера ===
+const server = http.createServer(app);
 
-wss.on('connection', (ws) => {
-  const socketId = uuidv4();
-  clients.set(socketId, ws);
+// === WebSocket сервер ===
+const wss = new WebSocket.Server({ server });
 
-  ws.on('message', async (msg) => {
-    try {
-      const data = JSON.parse(msg);
-      if (data.type === 'register') {
-        const userId = uuidv4();
-        db.run(`INSERT INTO users (id, instrument, socket_id) VALUES (?, ?, ?)`, [userId, data.instrument, socketId]);
-        ws.userId = userId;
+// === Очередь пользователей для поиска собеседников ===
+let waiting = null;
 
-        const match = await findMatch(data.instrument, userId);
-        if (match) {
-          db.run(`UPDATE users SET connected = 1 WHERE id IN (?, ?)`, [userId, match.id]);
-          ws.send(JSON.stringify({ type: 'match', peerId: match.socket_id }));
-          if (clients.has(match.socket_id)) {
-            clients.get(match.socket_id).send(JSON.stringify({ type: 'match', peerId: socketId }));
-          }
-        }
-      } else if (data.type === 'signal') {
-        if (clients.has(data.to)) {
-          clients.get(data.to).send(JSON.stringify({
-            type: 'signal',
-            from: socketId,
-            signal: data.signal,
-          }));
-        }
-      }
-    } catch (e) {
-      console.error('Error handling message', e);
+wss.on('connection', (ws, req) => {
+  console.log('Новое WebSocket-соединение');
+
+  // Простейшая логика "чат-рулетки"
+  if (waiting && waiting.readyState === WebSocket.OPEN) {
+    // Соединяем двух пользователей
+    const peer = waiting;
+    waiting = null;
+
+    ws.peer = peer;
+    peer.peer = ws;
+
+    ws.send(JSON.stringify({ type: 'status', message: 'Собеседник найден!' }));
+    peer.send(JSON.stringify({ type: 'status', message: 'Собеседник найден!' }));
+  } else {
+    // Если нет ожидающих — ставим в очередь
+    waiting = ws;
+    ws.send(JSON.stringify({ type: 'status', message: 'Ожидание собеседника...' }));
+  }
+
+  ws.on('message', (msg) => {
+    // Пересылаем сообщения собеседнику
+    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      ws.peer.send(msg);
     }
   });
 
   ws.on('close', () => {
-    clients.delete(socketId);
-    db.run(`DELETE FROM users WHERE socket_id = ?`, [socketId]);
+    // Оповещаем собеседника о разрыве соединения
+    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      ws.peer.send(JSON.stringify({ type: 'status', message: 'Собеседник отключился.' }));
+      ws.peer.peer = null;
+    }
+    // Если пользователь был в ожидании — убираем из очереди
+    if (waiting === ws) {
+      waiting = null;
+    }
   });
 });
 
-app.use(express.static(path.join(__dirname, '../frontend')));
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server started on http://localhost:${PORT}`));
-
+// === Запуск сервера ===
+server.listen(PORT, () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
+});
