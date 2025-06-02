@@ -75,6 +75,45 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+let clients = [];
+
+wss.on('connection', (ws) => {
+  ws.instrument = null; // пока не знаем инструмент
+
+  ws.on('message', (msg) => {
+    let data;
+    try {
+      data = JSON.parse(msg);
+    } catch (e) {
+      return;
+    }
+
+    if (data.type === 'register') {
+      ws.instrument = data.instrument;
+      if (!clients.includes(ws)) clients.push(ws);
+      broadcastClients();
+    }
+
+    // ... остальная логика сигналинга
+  });
+
+  ws.on('close', () => {
+    clients = clients.filter(client => client !== ws);
+    broadcastClients();
+  });
+});
+
+// Функция для рассылки списка клиентов
+function broadcastClients() {
+  const users = clients
+    .filter(ws => ws.instrument)
+    .map(ws => ({ instrument: ws.instrument }));
+  const msg = JSON.stringify({ type: 'clients', users });
+  clients.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  });
+}
+
 // === Запуск сервера ===
 server.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
