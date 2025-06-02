@@ -6,17 +6,29 @@ const WebSocket = require('ws');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Раздача статики
-app.use(express.static(path.join(__dirname, 'frontend')));
+// Путь к папке frontend (от backend/server.js)
+const frontendPath = path.join(__dirname, '..', 'frontend');
 
+// Раздача статики
+app.use(express.static(frontendPath));
+
+// Явная обработка /
+app.get('/', (req, res) => {
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
+// Создаем HTTP сервер
 const server = http.createServer(app);
+
+// WebSocket сервер
 const wss = new WebSocket.Server({ server });
 
+// Массив всех подключённых клиентов
 let clients = [];
 
+// При подключении нового клиента
 wss.on('connection', (ws) => {
-  // По умолчанию инструмент null, но user уже онлайн
-  ws.instrument = null;
+  ws.instrument = null; // по умолчанию инструмент не выбран
   clients.push(ws);
   broadcastClients();
 
@@ -37,7 +49,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Рассылка списка онлайн всем клиентам
+// Функция рассылки списка всех подключённых пользователей
 function broadcastClients() {
   const users = clients.map(ws => ({
     instrument: ws.instrument
