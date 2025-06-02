@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Music Chatroulette</title>
+  <title>Музыкальная Чатрулетка</title>
   <style>
     body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 30px; }
     video { width: 300px; height: 225px; background: #000; margin: 10px; }
@@ -11,19 +11,24 @@
   </style>
 </head>
 <body>
-  <h2>��бе�и ин����мен�</h2>
+  <h2>Выбери инструмент</h2>
   <select id="instrument">
-    <option value="guitar">�и�а�а</option>
-    <option value="keyboard">�лави�и</option>
-    <option value="drums">�а�абан�</option>
+    <option value="guitar">Гитара</option>
+    <option value="keyboard">Клавиши</option>
+    <option value="drums">Барабаны</option>
   </select>
-  <button id="start">�одкл��и����</button>
+  <button id="start">Подключиться</button>
   <div id="videos">
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
   <script>
+    // Определяем протокол для WebSocket
+    const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    // Если сервер ожидает на /ws/, используйте этот путь, иначе просто /
+    const ws = new WebSocket(`${wsProtocol}://${location.host}/`);
+
     const startBtn = document.getElementById('start');
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
@@ -31,14 +36,15 @@
 
     let localStream;
     let peerConnection;
+    let matchedId;
     const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    const ws = new WebSocket(`${wsProtocol}://${location.host}/ws/`);
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'match') {
         createOffer(data.peerId);
       } else if (data.type === 'signal') {
+        if (!peerConnection) return;
         if (data.signal.type === 'offer') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
           const answer = await peerConnection.createAnswer();
@@ -49,31 +55,37 @@
         } else if (data.signal.candidate) {
           await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
         }
+      } else if (data.type === 'status') {
+        // Можно добавить отображение статуса пользователю
+        console.log(data.message);
       }
     };
 
     startBtn.onclick = async () => {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
 
-      peerConnection = new RTCPeerConnection(config);
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        peerConnection = new RTCPeerConnection(config);
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          ws.send(JSON.stringify({ type: 'signal', to: matchedId, signal: event.candidate }));
-        }
-      };
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate && matchedId) {
+            ws.send(JSON.stringify({ type: 'signal', to: matchedId, signal: event.candidate }));
+          }
+        };
 
-      peerConnection.ontrack = (event) => {
-        remoteVideo.srcObject = event.streams[0];
-      };
+        peerConnection.ontrack = (event) => {
+          remoteVideo.srcObject = event.streams[0];
+        };
 
-      const instrument = instrumentSelect.value;
-      ws.send(JSON.stringify({ type: 'register', instrument }));
+        const instrument = instrumentSelect.value;
+        ws.send(JSON.stringify({ type: 'register', instrument }));
+      } catch (err) {
+        alert('Ошибка доступа к камере/микрофону: ' + err.message);
+      }
     };
 
-    let matchedId;
     async function createOffer(peerId) {
       matchedId = peerId;
       const offer = await peerConnection.createOffer();
