@@ -29,6 +29,7 @@ let clients = [];
 // При подключении нового клиента
 wss.on('connection', (ws) => {
   ws.instrument = null; // по умолчанию инструмент не выбран
+  ws.avatar = null;     // по умолчанию аватар отсутствует
   clients.push(ws);
   broadcastClients();
 
@@ -39,6 +40,12 @@ wss.on('connection', (ws) => {
     // Регистрация инструмента или его смена
     if (data.type === 'register') {
       ws.instrument = data.instrument;
+      broadcastClients();
+    }
+
+    // Получение аватара (миниатюры) от клиента
+    if (data.type === 'avatar') {
+      ws.avatar = data.image; // base64 строка
       broadcastClients();
     }
   });
@@ -52,7 +59,8 @@ wss.on('connection', (ws) => {
 // Функция рассылки списка всех подключённых пользователей
 function broadcastClients() {
   const users = clients.map(ws => ({
-    instrument: ws.instrument
+    instrument: ws.instrument,
+    avatar: ws.avatar // base64 или null
   }));
   const msg = JSON.stringify({ type: 'clients', users });
   clients.forEach(ws => {
