@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
+const { randomUUID } = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,8 +29,10 @@ let clients = [];
 
 // При подключении нового клиента
 wss.on('connection', (ws) => {
-  ws.instrument = null; // по умолчанию инструмент не выбран
-  ws.avatar = null;     // по умолчанию аватар отсутствует
+  ws.id = randomUUID(); // уникальный id для каждого клиента
+  ws.instrument = null;
+  ws.avatar = null;
+  ws.peer = null;
   clients.push(ws);
   broadcastClients();
 
@@ -45,12 +48,33 @@ wss.on('connection', (ws) => {
 
     // Получение аватара (миниатюры) от клиента
     if (data.type === 'avatar') {
-      ws.avatar = data.image; // base64 строка
+      ws.avatar = data.image;
       broadcastClients();
+    }
+
+    // Запрос на соединение с другим пользователем
+    if (data.type === 'connect') {
+      let target = clients.find(c => c.id === data.targetId);
+      if (target && target.readyState === WebSocket.OPEN && target !== ws) {
+        ws.peer = target;
+        target.peer = ws;
+        ws.send(JSON.stringify({ type: 'status', message: 'Подключено к пользователю', peerId: target.id }));
+        target.send(JSON.stringify({ type: 'status', message: 'К вам подключились', peerId: ws.id }));
+      }
+    }
+
+    // WebRTC сигналинг между выбранными пользователями
+    if (data.type === 'signal' && ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      ws.peer.send(JSON.stringify({ type: 'signal', from: ws.id, signal: data.signal }));
     }
   });
 
   ws.on('close', () => {
+    // Отключаем peer-связь, если была
+    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      ws.peer.peer = null;
+      ws.peer.send(JSON.stringify({ type: 'status', message: 'Пользователь отключился', peerId: null }));
+    }
     clients = clients.filter(client => client !== ws);
     broadcastClients();
   });
@@ -59,8 +83,9 @@ wss.on('connection', (ws) => {
 // Функция рассылки списка всех подключённых пользователей
 function broadcastClients() {
   const users = clients.map(ws => ({
+    id: ws.id,
     instrument: ws.instrument,
-    avatar: ws.avatar // base64 или null
+    avatar: ws.avatar
   }));
   const msg = JSON.stringify({ type: 'clients', users });
   clients.forEach(ws => {
