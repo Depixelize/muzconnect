@@ -7,6 +7,10 @@
   <style>
     body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 30px; }
     #usersOnline { margin: 20px 0; padding: 10px 20px; background: #f3f3f3; border-radius: 10px; min-width: 250px; }
+    .user-row { display: flex; align-items: center; margin-bottom: 6px; }
+    .user-avatar { width: 40px; height: 30px; border-radius: 5px; margin-right: 8px; object-fit: cover; background: #eee; }
+    .user-label { font-size: 1.1em; }
+    #addAvatarBtn { margin-bottom: 15px; }
   </style>
 </head>
 <body>
@@ -18,6 +22,8 @@
     <option value="drums">Барабаны</option>
   </select>
 
+  <button id="addAvatarBtn">Показать себя с камерой</button>
+
   <div id="usersOnline"><b>Сейчас онлайн:</b> —</div>
 
   <script>
@@ -27,6 +33,7 @@
 
     const instrumentSelect = document.getElementById('instrument');
     const usersOnlineDiv = document.getElementById('usersOnline');
+    const addAvatarBtn = document.getElementById('addAvatarBtn');
 
     // Отправляем register сразу после открытия соединения
     ws.onopen = () => {
@@ -38,20 +45,52 @@
       ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
     };
 
+    // Кнопка для отправки миниатюры с камеры
+    addAvatarBtn.onclick = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        await video.play();
+
+        // Делаем снимок с камеры
+        const canvas = document.createElement('canvas');
+        canvas.width = 80; // миниатюра
+        canvas.height = 60;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const image = canvas.toDataURL('image/jpeg');
+
+        ws.send(JSON.stringify({ type: 'avatar', image }));
+
+        // Останавливаем камеру
+        stream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        alert('Не удалось получить доступ к камере');
+      }
+    };
+
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'clients') {
         if (data.users.length === 0) {
           usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b> —';
         } else {
-          usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b> ' +
+          usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b><br>' +
             data.users.map(u => {
-              if (!u.instrument) return '👤 Гость';
-              if (u.instrument === 'guitar') return '🎸 Гитара';
-              if (u.instrument === 'keyboard') return '🎹 Клавиши';
-              if (u.instrument === 'drums') return '🥁 Барабаны';
-              return '👤 ' + u.instrument;
-            }).join(', ');
+              let label = '';
+              if (!u.instrument) label = '👤 Гость';
+              if (u.instrument === 'guitar') label = '🎸 Гитара';
+              if (u.instrument === 'keyboard') label = '🎹 Клавиши';
+              if (u.instrument === 'drums') label = '🥁 Барабаны';
+              if (u.avatar) {
+                // Показываем миниатюру
+                return `<div class="user-row"><img class="user-avatar" src="${u.avatar}"><span class="user-label">${label}</span></div>`;
+              } else {
+                // Без картинки
+                return `<div class="user-row"><span class="user-label">${label}</span></div>`;
+              }
+            }).join('');
         }
       }
     };
