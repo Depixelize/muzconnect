@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+    container_name: bandconnect_app
+    restart: always
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "3000"
+    networks:
+      - web
+
+  nginx:
+    image: nginx:alpine
+    container_name: bandconnect_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - app
+    networks:
+      - web
+
+networks:
+  web:
+    driver: bridge
+

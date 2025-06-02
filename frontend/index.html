@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Music Chatroulette</title>
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 30px; }
+    video { width: 300px; height: 225px; background: #000; margin: 10px; }
+    #videos { display: flex; gap: 20px; }
+  </style>
+</head>
+<body>
+  <h2>ÐÑÐ±ÐµÑÐ¸ Ð¸Ð½ÑÑÑÑÐ¼ÐµÐ½Ñ</h2>
+  <select id="instrument">
+    <option value="guitar">ÐÐ¸ÑÐ°ÑÐ°</option>
+    <option value="keyboard">ÐÐ»Ð°Ð²Ð¸ÑÐ¸</option>
+    <option value="drums">ÐÐ°ÑÐ°Ð±Ð°Ð½Ñ</option>
+  </select>
+  <button id="start">ÐÐ¾Ð´ÐºÐ»ÑÑÐ¸ÑÑÑÑ</button>
+  <div id="videos">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+
+  <script>
+    const startBtn = document.getElementById('start');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const instrumentSelect = document.getElementById('instrument');
+
+    let localStream;
+    let peerConnection;
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const ws = new WebSocket(`${wsProtocol}://${location.host}/ws/`);
+
+    ws.onmessage = async (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'match') {
+        createOffer(data.peerId);
+      } else if (data.type === 'signal') {
+        if (data.signal.type === 'offer') {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: 'signal', to: data.from, signal: answer }));
+        } else if (data.signal.type === 'answer') {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+        } else if (data.signal.candidate) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
+        }
+      }
+    };
+
+    startBtn.onclick = async () => {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+
+      peerConnection = new RTCPeerConnection(config);
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'signal', to: matchedId, signal: event.candidate }));
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      const instrument = instrumentSelect.value;
+      ws.send(JSON.stringify({ type: 'register', instrument }));
+    };
+
+    let matchedId;
+    async function createOffer(peerId) {
+      matchedId = peerId;
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: 'signal', to: peerId, signal: offer }));
+    }
+  </script>
+</body>
+</html>
