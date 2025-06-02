@@ -8,22 +8,26 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Copy SSH key
+      - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
       - name: Add server to known_hosts
-        run: ssh-keyscan -H 82.147.84.236 >> ~/.ssh/known_hosts
+        run: |
+          ssh-keyscan -H 82.147.84.236 >> ~/.ssh/known_hosts
 
       - name: Deploy via SSH
+        env:
+          COMPOSE_INTERACTIVE_NO_CLI: 1
         run: |
-          ssh -i ~/.ssh/id_ed25519 root@82.147.84.236> << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 root@82.147.84.236 << 'EOF'
             cd /home/bandconnect
             docker-compose down
             git pull
