@@ -6,110 +6,55 @@
   <title>Музыкальная Чатрулетка</title>
   <style>
     body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 30px; }
-    video { width: 300px; height: 225px; background: #000; margin: 10px; }
-    #videos { display: flex; gap: 20px; }
     #usersOnline { margin: 20px 0; padding: 10px 20px; background: #f3f3f3; border-radius: 10px; min-width: 250px; }
   </style>
 </head>
 <body>
   <h2>Выбери инструмент</h2>
   <select id="instrument">
+    <option value="">— Не выбран —</option>
     <option value="guitar">Гитара</option>
     <option value="keyboard">Клавиши</option>
     <option value="drums">Барабаны</option>
   </select>
-  <button id="start">Подключиться</button>
 
   <div id="usersOnline"><b>Сейчас онлайн:</b> —</div>
-
-  <div id="videos">
-    <video id="localVideo" autoplay muted playsinline></video>
-    <video id="remoteVideo" autoplay playsinline></video>
-  </div>
 
   <script>
     // Определяем протокол для WebSocket
     const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${wsProtocol}://${location.host}/`);
 
-    const startBtn = document.getElementById('start');
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
     const instrumentSelect = document.getElementById('instrument');
     const usersOnlineDiv = document.getElementById('usersOnline');
 
-    let localStream;
-    let peerConnection;
-    let matchedId;
-    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    // Отправляем register сразу после открытия соединения
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
+    };
 
-    ws.onmessage = async (event) => {
+    // При смене инструмента отправляем на сервер
+    instrumentSelect.onchange = () => {
+      ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
+    };
+
+    ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'match') {
-        createOffer(data.peerId);
-      } else if (data.type === 'signal') {
-        if (!peerConnection) return;
-        if (data.signal.type === 'offer') {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          ws.send(JSON.stringify({ type: 'signal', to: data.from, signal: answer }));
-        } else if (data.signal.type === 'answer') {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
-        } else if (data.signal.candidate) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
-        }
-      } else if (data.type === 'status') {
-        // Можно добавить отображение статуса пользователю
-        console.log(data.message);
-      } else if (data.type === 'clients') {
-        // Обновляем список онлайн-юзеров
+      if (data.type === 'clients') {
         if (data.users.length === 0) {
           usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b> —';
         } else {
-          usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b> ' + 
-            data.users.map((u, i) => {
-              let icon = '';
-              if (u.instrument === 'guitar') icon = '🎸';
-              if (u.instrument === 'keyboard') icon = '🎹';
-              if (u.instrument === 'drums') icon = '🥁';
-              return `${icon} ${u.instrument[0].toUpperCase() + u.instrument.slice(1)}`;
+          usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b> ' +
+            data.users.map(u => {
+              if (!u.instrument) return '👤 Гость';
+              if (u.instrument === 'guitar') return '🎸 Гитара';
+              if (u.instrument === 'keyboard') return '🎹 Клавиши';
+              if (u.instrument === 'drums') return '🥁 Барабаны';
+              return '👤 ' + u.instrument;
             }).join(', ');
         }
       }
     };
-
-    startBtn.onclick = async () => {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = localStream;
-
-        peerConnection = new RTCPeerConnection(config);
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate && matchedId) {
-            ws.send(JSON.stringify({ type: 'signal', to: matchedId, signal: event.candidate }));
-          }
-        };
-
-        peerConnection.ontrack = (event) => {
-          remoteVideo.srcObject = event.streams[0];
-        };
-
-        const instrument = instrumentSelect.value;
-        ws.send(JSON.stringify({ type: 'register', instrument }));
-      } catch (err) {
-        alert('Ошибка доступа к камере/микрофону: ' + err.message);
-      }
-    };
-
-    async function createOffer(peerId) {
-      matchedId = peerId;
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: 'signal', to: peerId, signal: offer }));
-    }
   </script>
 </body>
 </html>
