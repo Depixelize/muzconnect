@@ -1,5 +1,3 @@
-// backend/server.js
-
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -9,15 +7,15 @@ const sqlite3 = require('sqlite3').verbose();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === Раздача статики из frontend ===
+// Раздача статики
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-// === Пример REST API (можно расширить) ===
+// Пример REST API
 app.get('/api/ping', (req, res) => {
   res.json({ message: 'pong' });
 });
 
-// === Инициализация SQLite ===
+// Инициализация SQLite
 const db = new sqlite3.Database(path.join(__dirname, '..', 'db.sqlite'), (err) => {
   if (err) {
     console.error('Ошибка подключения к базе:', err.message);
@@ -26,21 +24,25 @@ const db = new sqlite3.Database(path.join(__dirname, '..', 'db.sqlite'), (err) =
   }
 });
 
-// === Запуск HTTP сервера ===
+// Запуск HTTP сервера
 const server = http.createServer(app);
 
-// === WebSocket сервер ===
+// WebSocket сервер
 const wss = new WebSocket.Server({ server });
 
-// === Очередь пользователей для поиска собеседников ===
+// Очередь для матчмейкинга
 let waiting = null;
 
-wss.on('connection', (ws, req) => {
-  console.log('Новое WebSocket-соединение');
+// Массив всех подключённых клиентов
+let clients = [];
 
-  // Простейшая логика "чат-рулетки"
+wss.on('connection', (ws) => {
+  ws.instrument = null; // по умолчанию инструмент не выбран
+  clients.push(ws);
+  broadcastClients();
+
+  // Логика чат-рулетки (matchmaking)
   if (waiting && waiting.readyState === WebSocket.OPEN) {
-    // Соединяем двух пользователей
     const peer = waiting;
     waiting = null;
 
@@ -50,35 +52,9 @@ wss.on('connection', (ws, req) => {
     ws.send(JSON.stringify({ type: 'status', message: 'Собеседник найден!' }));
     peer.send(JSON.stringify({ type: 'status', message: 'Собеседник найден!' }));
   } else {
-    // Если нет ожидающих — ставим в очередь
     waiting = ws;
     ws.send(JSON.stringify({ type: 'status', message: 'Ожидание собеседника...' }));
   }
-
-  ws.on('message', (msg) => {
-    // Пересылаем сообщения собеседнику
-    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
-      ws.peer.send(msg);
-    }
-  });
-
-  ws.on('close', () => {
-    // Оповещаем собеседника о разрыве соединения
-    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
-      ws.peer.send(JSON.stringify({ type: 'status', message: 'Собеседник отключился.' }));
-      ws.peer.peer = null;
-    }
-    // Если пользователь был в ожидании — убираем из очереди
-    if (waiting === ws) {
-      waiting = null;
-    }
-  });
-});
-
-let clients = [];
-
-wss.on('connection', (ws) => {
-  ws.instrument = null; // пока не знаем инструмент
 
   ws.on('message', (msg) => {
     let data;
@@ -90,31 +66,47 @@ wss.on('connection', (ws) => {
 
     if (data.type === 'register') {
       ws.instrument = data.instrument;
-      if (!clients.includes(ws)) clients.push(ws);
       broadcastClients();
     }
 
-    // ... остальная логика сигналинга
+    // WebRTC сигналинг
+    if (data.type === 'signal') {
+      if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+        ws.peer.send(JSON.stringify({
+          type: 'signal',
+          from: ws._socket.remotePort, // или генерируйте свой id
+          signal: data.signal
+        }));
+      }
+    }
   });
 
   ws.on('close', () => {
+    // Если был в очереди — убираем
+    if (waiting === ws) waiting = null;
+    // Если был в паре — уведомляем собеседника
+    if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      ws.peer.send(JSON.stringify({ type: 'status', message: 'Собеседник отключился.' }));
+      ws.peer.peer = null;
+    }
+    // Удаляем из массива клиентов и обновляем онлайн-список
     clients = clients.filter(client => client !== ws);
     broadcastClients();
   });
 });
 
-// Функция для рассылки списка клиентов
+// Функция рассылки списка всех подключённых пользователей
 function broadcastClients() {
-  const users = clients
-    .filter(ws => ws.instrument)
-    .map(ws => ({ instrument: ws.instrument }));
+  const users = clients.map(ws => ({
+    instrument: ws.instrument
+  }));
   const msg = JSON.stringify({ type: 'clients', users });
   clients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   });
 }
 
-// === Запуск сервера ===
+// Запуск сервера
 server.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
 });
