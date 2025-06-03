@@ -27,7 +27,7 @@ jobs:
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 root@82.147.84.236 << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 deployer@82.147.84.236 << 'EOF'
             cd /home/bandconnect
             docker-compose down
             git pull
