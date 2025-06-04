@@ -27,7 +27,35 @@ services:
     networks:
       - web
 
+  turn:
+    image: instrumentisto/coturn:latest
+    container_name: bandconnect_turn
+    restart: always
+    ports:
+      - "3478:3478"       # UDP и TCP для TURN/STUN
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"  # медиапорты для relay (можно расширить)
+    environment:
+      - TURN_PORT=3478
+      - TURN_USER=webrtc
+      - TURN_PASSWORD=supersecret
+      - TURN_REALM=bandconnect
+      - TURN_VERBOSE=false
+    command: >
+      --no-cli
+      --no-tls
+      --no-dtls
+      --fingerprint
+      --user webrtc:supersecret
+      --realm bandconnect
+      --external-ip=82.147.84.236
+      --min-port=49160
+      --max-port=49200
+      --log-file=stdout
+    networks:
+      - web
+
 networks:
   web:
     driver: bridge
-
