@@ -33,8 +33,8 @@ wss.on('connection', (ws) => {
   ws.instrument = null;
   ws.avatar = null;
   ws.peer = null;
-  ws.iceQueue = [];
   clients.push(ws);
+  console.log(`[${new Date().toLocaleTimeString()}] Новый клиент: ${ws.id}. Всего: ${clients.length}`);
   broadcastClients();
 
   ws.on('message', (msg) => {
@@ -45,12 +45,14 @@ wss.on('connection', (ws) => {
     if (data.type === 'register') {
       ws.instrument = data.instrument;
       broadcastClients();
+      console.log(`[${new Date().toLocaleTimeString()}] ${ws.id} выбрал инструмент: ${ws.instrument}`);
     }
 
     // Получение аватара (миниатюры) от клиента
     if (data.type === 'avatar') {
       ws.avatar = data.image;
       broadcastClients();
+      console.log(`[${new Date().toLocaleTimeString()}] ${ws.id} отправил аватар`);
     }
 
     // Запрос на соединение с другим пользователем
@@ -67,13 +69,16 @@ wss.on('connection', (ws) => {
         target.peer = ws;
         ws.send(JSON.stringify({ type: 'status', message: 'Подключено к пользователю', peerId: target.id }));
         target.send(JSON.stringify({ type: 'status', message: 'К вам подключились', peerId: ws.id }));
+        console.log(`[${new Date().toLocaleTimeString()}] ${ws.id} подключился к ${target.id}`);
       }
     }
 
     // WebRTC сигналинг между выбранными пользователями
     if (data.type === 'signal' && ws.peer && ws.peer.readyState === WebSocket.OPEN) {
-      // ICE-кандидаты могут приходить до setRemoteDescription — передаём их всегда
       ws.peer.send(JSON.stringify({ type: 'signal', from: ws.id, signal: data.signal }));
+      if (data.signal.type) {
+        console.log(`[${new Date().toLocaleTimeString()}] Сигнал ${data.signal.type} от ${ws.id} к ${ws.peer.id}`);
+      }
     }
   });
 
@@ -82,9 +87,11 @@ wss.on('connection', (ws) => {
     if (ws.peer && ws.peer.readyState === WebSocket.OPEN) {
       ws.peer.peer = null;
       ws.peer.send(JSON.stringify({ type: 'status', message: 'Пользователь отключился', peerId: null }));
+      console.log(`[${new Date().toLocaleTimeString()}] ${ws.id} отключился от ${ws.peer.id}`);
     }
     clients = clients.filter(client => client !== ws);
     broadcastClients();
+    console.log(`[${new Date().toLocaleTimeString()}] Клиент отключён: ${ws.id}. Осталось: ${clients.length}`);
   });
 });
 
