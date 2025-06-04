@@ -33,6 +33,7 @@ wss.on('connection', (ws) => {
   ws.instrument = null;
   ws.avatar = null;
   ws.peer = null;
+  ws.iceQueue = [];
   clients.push(ws);
   broadcastClients();
 
@@ -54,6 +55,12 @@ wss.on('connection', (ws) => {
 
     // Запрос на соединение с другим пользователем
     if (data.type === 'connect') {
+      // Сброс предыдущей peer-связи
+      if (ws.peer && ws.peer.peer === ws) {
+        ws.peer.peer = null;
+      }
+      ws.peer = null;
+
       let target = clients.find(c => c.id === data.targetId);
       if (target && target.readyState === WebSocket.OPEN && target !== ws) {
         ws.peer = target;
@@ -65,6 +72,7 @@ wss.on('connection', (ws) => {
 
     // WebRTC сигналинг между выбранными пользователями
     if (data.type === 'signal' && ws.peer && ws.peer.readyState === WebSocket.OPEN) {
+      // ICE-кандидаты могут приходить до setRemoteDescription — передаём их всегда
       ws.peer.send(JSON.stringify({ type: 'signal', from: ws.id, signal: data.signal }));
     }
   });
