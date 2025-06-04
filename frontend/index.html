@@ -91,7 +91,7 @@
     let peerConnection = null;
     let localStream = null;
     let pendingCandidates = [];
-    let onlyViewer = false; // режим "только смотреть"
+    let onlyViewer = true; // По умолчанию режим "только смотреть"
 
     // --- TURN/STUN конфиг ---
     const iceServers = [
@@ -147,7 +147,10 @@
 
     viewerBtn.onclick = () => {
       onlyViewer = true;
-      localStream = null;
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
       localVideo.srcObject = null;
       logMessage('Режим "только смотреть" активирован', 'info');
     };
@@ -205,16 +208,10 @@
         if (data.signal.type === 'offer') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
           logMessage('setRemoteDescription(offer)', 'info');
-          if (!onlyViewer && !localStream) {
-            try {
-              localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-              localVideo.srcObject = localStream;
-              localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-              logMessage('Локальный поток добавлен для ответа', 'info');
-            } catch (e) {
-              logMessage('Ошибка доступа к камере/микрофону для WebRTC: ' + e.message, 'error');
-              // В режиме "только смотреть" просто не добавляем поток
-            }
+          // Не вызываем getUserMedia автоматически!
+          if (!onlyViewer && localStream) {
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            logMessage('Локальный поток добавлен для ответа', 'info');
           }
           const answer = await peerConnection.createAnswer();
           await peerConnection.setLocalDescription(answer);
@@ -265,6 +262,7 @@
 
     async function startWebRTC(targetPeerId) {
       if (!peerConnection) peerConnection = createPeerConnection();
+      // Не вызываем getUserMedia автоматически!
       if (!onlyViewer && !localStream) {
         try {
           logMessage('Запрашиваем доступ к камере/микрофону для WebRTC...', 'info');
@@ -278,7 +276,7 @@
         }
       }
       // Только инициатор создаёт offer
-      if (targetPeerId && myId) {
+      if (targetPeerId && myId && !onlyViewer) {
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         ws.send(JSON.stringify({ type: 'signal', signal: offer }));
