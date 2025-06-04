@@ -90,6 +90,16 @@
     let localStream = null;
     let pendingCandidates = [];
 
+    // --- TURN/STUN конфиг ---
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      {
+        urls: 'turn:82.147.84.236:3478',
+        username: 'webrtc',
+        credential: 'supersecret'
+      }
+    ];
+
     ws.onopen = () => {
       logMessage('WebSocket соединение установлено', 'info');
       ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
@@ -216,8 +226,7 @@
     };
 
     function createPeerConnection() {
-      const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-      const pc = new RTCPeerConnection(config);
+      const pc = new RTCPeerConnection({ iceServers });
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -231,7 +240,6 @@
         logMessage('Получен медиапоток от собеседника', 'info');
       };
 
-      // Если камера уже включена — добавляем треки
       if (localStream) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         logMessage('Локальные треки добавлены в PeerConnection', 'info');
