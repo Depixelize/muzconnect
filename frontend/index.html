@@ -15,6 +15,23 @@
     #status { margin: 10px 0; color: #1c6; }
     #videos { display: flex; gap: 20px; margin: 15px 0; }
     video { width: 240px; height: 180px; background: #000; border-radius: 8px; }
+    #logWindow {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 400px;
+      height: 220px;
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      padding: 10px;
+      overflow-y: auto;
+      border-radius: 7px;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 1000;
+      box-shadow: 0 2px 8px #0008;
+    }
+    #logContent div { margin: 2px 0; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -36,7 +53,27 @@
     <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
+  <div id="logWindow"><div id="logContent"></div></div>
+
   <script>
+    // --- Логирование ---
+    const logContent = document.getElementById('logContent');
+    const logWindow = document.getElementById('logWindow');
+    function logMessage(message, type = 'info') {
+      const colors = {
+        info: '#00ff00',
+        error: '#ff5555',
+        warning: '#ffff00',
+        signal: '#00ffff'
+      };
+      const logEntry = document.createElement('div');
+      logEntry.style.color = colors[type] || '#fff';
+      logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContent.appendChild(logEntry);
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    // --- Основные переменные ---
     const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${wsProtocol}://${location.host}/`);
 
@@ -51,19 +88,28 @@
     let peerId = null;
     let peerConnection = null;
     let localStream = null;
+    let pendingCandidates = [];
 
     ws.onopen = () => {
+      logMessage('WebSocket соединение установлено', 'info');
       ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
+    };
+
+    ws.onerror = (error) => {
+      logMessage(`WebSocket ошибка: ${error.message}`, 'error');
     };
 
     instrumentSelect.onchange = () => {
       ws.send(JSON.stringify({ type: 'register', instrument: instrumentSelect.value }));
+      logMessage('Инструмент выбран: ' + instrumentSelect.value, 'info');
     };
 
     addAvatarBtn.onclick = async () => {
       try {
+        logMessage('Запрос доступа к камере...', 'info');
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localVideo.srcObject = localStream;
+        logMessage('Камера активирована', 'info');
 
         // Делаем снимок с камеры для аватара
         const video = document.createElement('video');
@@ -78,9 +124,9 @@
         const image = canvas.toDataURL('image/jpeg');
 
         ws.send(JSON.stringify({ type: 'avatar', image }));
-
-        // Останавливать камеру не нужно — теперь она используется для WebRTC
+        logMessage('Аватар отправлен на сервер', 'info');
       } catch (e) {
+        logMessage('Ошибка доступа к камере: ' + e.message, 'error');
         alert('Не удалось получить доступ к камере/микрофону');
       }
     };
@@ -89,16 +135,16 @@
       let row = event.target.closest('.user-row[data-userid]');
       if (row && row.dataset.userid && row.dataset.userid !== myId) {
         ws.send(JSON.stringify({ type: 'connect', targetId: row.dataset.userid }));
+        logMessage('Запрошено подключение к пользователю ' + row.dataset.userid, 'info');
       }
     };
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'clients') {
-        // Узнаём свой id (он всегда есть в списке)
         if (!myId && data.users.length > 0) {
-          // Берём свой id по последнему добавленному (или по совпадению инструмента/аватара)
           myId = data.users[data.users.length - 1].id;
+          logMessage('Мой id: ' + myId, 'info');
         }
         usersOnlineDiv.innerHTML = '<b>Сейчас онлайн:</b><br>' +
           data.users.map(u => {
@@ -118,28 +164,34 @@
       }
       if (data.type === 'status') {
         statusDiv.textContent = data.message;
+        logMessage('Статус: ' + data.message, 'info');
         if (data.peerId) {
           peerId = data.peerId;
           if (peerId) {
+            logMessage('Начинаем WebRTC с peerId: ' + peerId, 'info');
             startWebRTC(peerId);
           } else {
             closeWebRTC();
+            logMessage('WebRTC соединение завершено', 'info');
           }
         }
       }
       if (data.type === 'signal') {
+        logMessage('Получен сигнал: ' + (data.signal.type || 'candidate'), 'signal');
         if (!peerConnection) {
           peerConnection = createPeerConnection();
         }
         if (data.signal.type === 'offer') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+          logMessage('setRemoteDescription(offer)', 'info');
           if (!localStream) {
-            // Если пользователь ещё не включил камеру, запрашиваем её
             try {
               localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
               localVideo.srcObject = localStream;
               localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+              logMessage('Локальный поток добавлен для ответа', 'info');
             } catch (e) {
+              logMessage('Ошибка доступа к камере/микрофону для WebRTC: ' + e.message, 'error');
               alert('Не удалось получить доступ к камере/микрофону для WebRTC');
               return;
             }
@@ -147,10 +199,18 @@
           const answer = await peerConnection.createAnswer();
           await peerConnection.setLocalDescription(answer);
           ws.send(JSON.stringify({ type: 'signal', signal: answer }));
+          logMessage('Отправлен answer', 'signal');
         } else if (data.signal.type === 'answer') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+          logMessage('setRemoteDescription(answer)', 'info');
         } else if (data.signal.candidate) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
+          if (peerConnection.remoteDescription) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
+            logMessage('addIceCandidate (сразу)', 'signal');
+          } else {
+            pendingCandidates.push(data.signal);
+            logMessage('ICE-кандидат сохранён до remoteDescription', 'warning');
+          }
         }
       }
     };
@@ -162,33 +222,39 @@
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           ws.send(JSON.stringify({ type: 'signal', signal: event.candidate }));
+          logMessage('Отправлен ICE-кандидат', 'signal');
         }
       };
 
       pc.ontrack = (event) => {
-        // Выводим видео собеседника
         remoteVideo.srcObject = event.streams[0];
+        logMessage('Получен медиапоток от собеседника', 'info');
       };
 
       // Если камера уже включена — добавляем треки
       if (localStream) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        logMessage('Локальные треки добавлены в PeerConnection', 'info');
       }
+
+      pc.onconnectionstatechange = () => {
+        logMessage('Состояние соединения: ' + pc.connectionState, 'info');
+      };
 
       return pc;
     }
 
     async function startWebRTC(targetPeerId) {
       if (!peerConnection) peerConnection = createPeerConnection();
-      if (localStream) {
-        // Уже есть камера, добавили треки в createPeerConnection
-      } else {
-        // Запрашиваем камеру, если ещё не запрошена
+      if (!localStream) {
         try {
+          logMessage('Запрашиваем доступ к камере/микрофону для WebRTC...', 'info');
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
           localVideo.srcObject = localStream;
           localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+          logMessage('Локальный поток добавлен для инициации', 'info');
         } catch (e) {
+          logMessage('Ошибка доступа к камере/микрофону для WebRTC: ' + e.message, 'error');
           alert('Не удалось получить доступ к камере/микрофону для WebRTC');
           return;
         }
@@ -198,6 +264,15 @@
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         ws.send(JSON.stringify({ type: 'signal', signal: offer }));
+        logMessage('Отправлен offer', 'signal');
+      }
+      // Применяем отложенные ICE-кандидаты
+      if (pendingCandidates.length && peerConnection.remoteDescription) {
+        for (const candidate of pendingCandidates) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          logMessage('addIceCandidate (отложенный)', 'signal');
+        }
+        pendingCandidates = [];
       }
     }
 
