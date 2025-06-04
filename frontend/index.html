@@ -11,7 +11,7 @@
     .user-row.me { background: #e0ffe0; cursor: default; }
     .user-avatar { width: 40px; height: 30px; border-radius: 5px; margin-right: 8px; object-fit: cover; background: #eee; }
     .user-label { font-size: 1.1em; }
-    #addAvatarBtn { margin-bottom: 15px; }
+    #addAvatarBtn, #viewerBtn { margin-bottom: 15px; }
     #status { margin: 10px 0; color: #1c6; }
     #videos { display: flex; gap: 20px; margin: 15px 0; }
     video { width: 240px; height: 180px; background: #000; border-radius: 8px; }
@@ -44,6 +44,7 @@
   </select>
 
   <button id="addAvatarBtn">Показать себя с камерой</button>
+  <button id="viewerBtn">Только смотреть</button>
 
   <div id="status"></div>
   <div id="usersOnline"><b>Сейчас онлайн:</b> —</div>
@@ -80,6 +81,7 @@
     const instrumentSelect = document.getElementById('instrument');
     const usersOnlineDiv = document.getElementById('usersOnline');
     const addAvatarBtn = document.getElementById('addAvatarBtn');
+    const viewerBtn = document.getElementById('viewerBtn');
     const statusDiv = document.getElementById('status');
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
@@ -89,6 +91,7 @@
     let peerConnection = null;
     let localStream = null;
     let pendingCandidates = [];
+    let onlyViewer = false; // режим "только смотреть"
 
     // --- TURN/STUN конфиг ---
     const iceServers = [
@@ -115,6 +118,7 @@
     };
 
     addAvatarBtn.onclick = async () => {
+      onlyViewer = false;
       try {
         logMessage('Запрос доступа к камере...', 'info');
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -139,6 +143,13 @@
         logMessage('Ошибка доступа к камере: ' + e.message, 'error');
         alert('Не удалось получить доступ к камере/микрофону');
       }
+    };
+
+    viewerBtn.onclick = () => {
+      onlyViewer = true;
+      localStream = null;
+      localVideo.srcObject = null;
+      logMessage('Режим "только смотреть" активирован', 'info');
     };
 
     usersOnlineDiv.onclick = (event) => {
@@ -194,7 +205,7 @@
         if (data.signal.type === 'offer') {
           await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
           logMessage('setRemoteDescription(offer)', 'info');
-          if (!localStream) {
+          if (!onlyViewer && !localStream) {
             try {
               localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
               localVideo.srcObject = localStream;
@@ -202,8 +213,7 @@
               logMessage('Локальный поток добавлен для ответа', 'info');
             } catch (e) {
               logMessage('Ошибка доступа к камере/микрофону для WebRTC: ' + e.message, 'error');
-              alert('Не удалось получить доступ к камере/микрофону для WebRTC');
-              return;
+              // В режиме "только смотреть" просто не добавляем поток
             }
           }
           const answer = await peerConnection.createAnswer();
@@ -240,7 +250,8 @@
         logMessage('Получен медиапоток от собеседника', 'info');
       };
 
-      if (localStream) {
+      // Добавляем треки только если не режим "только смотреть"
+      if (!onlyViewer && localStream) {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         logMessage('Локальные треки добавлены в PeerConnection', 'info');
       }
@@ -254,7 +265,7 @@
 
     async function startWebRTC(targetPeerId) {
       if (!peerConnection) peerConnection = createPeerConnection();
-      if (!localStream) {
+      if (!onlyViewer && !localStream) {
         try {
           logMessage('Запрашиваем доступ к камере/микрофону для WebRTC...', 'info');
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -263,8 +274,7 @@
           logMessage('Локальный поток добавлен для инициации', 'info');
         } catch (e) {
           logMessage('Ошибка доступа к камере/микрофону для WebRTC: ' + e.message, 'error');
-          alert('Не удалось получить доступ к камере/микрофону для WebRTC');
-          return;
+          // В режиме "только смотреть" просто не добавляем поток
         }
       }
       // Только инициатор создаёт offer
