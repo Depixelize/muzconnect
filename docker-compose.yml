@@ -33,8 +33,6 @@ services:
     restart: always
     ports:
       - "3478:3478"       # UDP и TCP для TURN/STUN
-      - "3478:3478/udp"
-      - "3478:3478/tcp"
       - "49160-49200:49160-49200/udp"  # медиапорты для relay (можно расширить)
     environment:
       - TURN_PORT=3478
